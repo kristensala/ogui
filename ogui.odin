@@ -1,126 +1,128 @@
 package ogui
 
-import "base:runtime"
-import "vendor:wgpu"
-import "vendor:glfw"
-import glg "vendor:wgpu/glfwglue"
+import "core:fmt"
+import sdl "vendor:sdl3"
 
-Window_Handle :: glfw.WindowHandle
+@(private = "file") Draw_Proc :: proc()
+@(private = "file") Update_Proc :: proc()
 
-Vec2 :: [2]f32
-
-Rect :: struct {
-    width: f32,
-    height: f32,
-    x: f32,
-    y: f32
-}
-
-Ogui_Error :: enum {
-    Window_Creation_Failed,
-    Glfw_Init_Failed
-}
-
-// resizeable etc
-Window_Options :: struct {
-}
-
-
-// TODO: track current font 
-// load_font() and unload_font
-// draw_rect
-// draw_line
-// draw_rect_rounded
-// draw_text, draw_text_ex
-// button()
-// mouse_check_collision(rect, mouse_pos)
-// get_mouse_pos() -> Vec2
-@(private = "package")
-State :: struct {
-    ctx: runtime.Context,
-
-    instance: wgpu.Instance,
-    surface: wgpu.Surface,
-    texture: wgpu.Texture,
-    adapter: wgpu.Adapter,
-    device: wgpu.Device,
-
-    window_handle: Window_Handle
-}
+Rect :: sdl.Rect
+FRect :: sdl.FRect
+Color :: sdl.Color
 
 @(private = "file")
-g_state: ^State
+State :: struct {
+    running: bool,
 
-//init :: glfw.Init
-//create_window :: glfw.CreateWindow
-//window_should_close :: glfw.WindowShouldClose
-//poll_events :: glfw.PollEvents
+    window: ^sdl.Window,
+    renderer: ^sdl.Renderer,
 
-@(require_results)
-init :: proc(
-    window_width: i32,
-    window_height: i32,
-    window_title: cstring,
-    options: Window_Options = {}
-) -> Ogui_Error {
-    g_state.ctx = context
+    background_color: sdl.Color,
 
-    if !bool(glfw.Init()) {
-        //glfw.GetError()
-        return .Glfw_Init_Failed
-    }
-
-    g_state.window_handle = glfw.CreateWindow(window_width, window_height, window_title, nil, nil)
-    if g_state.window_handle == nil {
-        // fmt.eprintln("failed to create the window")
-        return .Window_Creation_Failed
-    }
-    g_state.instance = wgpu.CreateInstance(nil)
-    g_state.surface = glg.GetSurface(g_state.instance, g_state.window_handle)
-
-    wgpu.InstanceRequestAdapter(
-        g_state.instance,
-        &{ compatibleSurface = g_state.surface },
-        { callback = on_adapter }
-    )
-
-    return nil
+    on_draw: Draw_Proc,
+    on_update: Update_Proc,
 }
 
-update :: proc() -> bool {
-    should_close := bool(glfw.WindowShouldClose(g_state.window_handle))
-    if !should_close {
-        // TODO: do some stuff
+
+@(private = "file")
+state: ^State
+
+poll_event :: sdl.PollEvent
+
+init :: proc(
+    width: i32,
+    height: i32,
+    title: cstring,
+    on_draw: Draw_Proc,
+    on_update: Update_Proc
+) {
+    state = new(State)
+    state.background_color = sdl.Color{0, 0, 0, sdl.ALPHA_OPAQUE} // black
+    state.on_draw = on_draw
+    state.on_update = on_update
+
+    if !sdl.Init({.VIDEO}) {
+        fmt.eprintln("sdl.Init failed: ", sdl.GetError())
+        return
     }
 
-    // if should_close is true then exit the update
-    return !should_close
+    state.window = sdl.CreateWindow(
+        title,
+        width,
+        height,
+        {},
+    )
+
+    if state.window == nil {
+        fmt.eprintln("Failed to create the window")
+        return
+    }
+
+    state.renderer = sdl.CreateRenderer(state.window, nil)
+    if state.renderer == nil {
+        fmt.eprintln("Could not create a renderer: ", sdl.GetError())
+        return
+    }
+
+
+    state.running = true
+}
+
+window_should_close :: proc() -> bool {
+    event : sdl.Event
+    for sdl.PollEvent(&event) {
+        #partial switch event.type {
+        case .QUIT:
+            state.running = false
+            break
+        }
+    }
+
+    state.on_update()
+
+    sdl.SetRenderDrawColor(state.renderer,
+        state.background_color.r,
+        state.background_color.g,
+        state.background_color.b,
+        state.background_color.a)
+
+    sdl.RenderClear(state.renderer)
+    // Drawing should be done between RenderClear and RenderPresent
+    state.on_draw()
+
+    sdl.RenderPresent(state.renderer)
+
+    return !state.running
 }
 
 shutdown :: proc() {
-    glfw.Terminate()
-    glfw.DestroyWindow(g_state.window_handle)
+    sdl.Quit()
+    sdl.DestroyWindow(state.window)
+    sdl.DestroyRenderer(state.renderer)
+
+    free(state)
 }
 
-// glfw.PollEvents()
-// if there is nothing specific to do here then just do poll_events :: glfw.PollEvents()
-poll_events :: proc() {
+draw_frect_ex :: proc(rect: ^FRect, color: Color) {
+    ok := sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
+	if !ok {
+		fmt.eprintln("Could not set the rect color: ", sdl.GetError())
+	}
+
+	sdl.RenderFillRect(state.renderer, rect)
 }
 
-get_window_size :: proc() -> (width, heigth: i32) {
-    assert(g_state.window_handle != nil, "Make sure ogui.init is called before")
-    return glfw.GetWindowSize(g_state.window_handle)
+draw_frect :: proc(x, y, w, h: f32, color: Color) -> FRect {
+    ok := sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
+	if !ok {
+		fmt.eprintln("Could not set the rect color: ", sdl.GetError())
+	}
+
+	rect: FRect = {x, y, w, h}
+	sdl.RenderFillRect(state.renderer, &rect)
+	return rect
 }
 
-
-@(private = "file")
-on_adapter :: proc "c" (
-    status: wgpu.RequestAdapterStatus,
-    adapter: wgpu.Adapter,
-    message: string,
-    userdata1: rawptr,
-    userdata2: rawptr
-) {
-    // TODO
+set_background_color :: proc(color: Color) {
+    state.background_color = color
 }
-

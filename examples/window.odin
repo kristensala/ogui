@@ -4,17 +4,30 @@ import og "../"
 
 import "core:fmt"
 
+WINDOW_WIDTH :: 1000
+WINDOW_HEIGHT :: 1200
+
 main :: proc() {
-    err := og.init(1000, 100, "title")
-    if err != nil {
-        return
-    }
+    og.init(
+        WINDOW_WIDTH,
+        WINDOW_HEIGHT,
+        "title",
+        on_draw,
+        on_update
+    )
+    og.set_background_color(og.Color{20, 250, 250, 255})
 
     // main loop
-    for og.update() {
+    for !og.window_should_close() {}
 
-    }
-
-    fmt.println("about to call shutdown")
+    fmt.println("Shutdown...")
     og.shutdown()
+}
+
+on_draw :: proc() {
+    og.draw_frect(0, 10, 100, 100, og.Color{0, 0, 0, 255})
+}
+
+on_update :: proc() {
+
 }
