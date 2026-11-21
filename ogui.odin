@@ -2,13 +2,14 @@ package ogui
 
 import "core:fmt"
 import sdl "vendor:sdl3"
+//import ttf "vendor:sdl3/ttf"
 
 @(private = "file") Draw_Proc :: proc()
 @(private = "file") Update_Proc :: proc()
+@(private = "file") Event_Proc :: proc()
 @(private = "file") On_Button_Click_Proc :: proc()
 
 Vec2 :: [2]f32
-Vec4 :: [4]i32
 Rect :: sdl.Rect
 F_Rect :: sdl.FRect
 Color :: sdl.Color
@@ -16,24 +17,47 @@ Window_Flags :: sdl.WindowFlags
 Renderer :: sdl.Renderer
 Mouse_Button_Flags :: sdl.MouseButtonFlags
 
+// TODO: Define some common Colors
+BLACK :: Color{0, 0, 0, sdl.ALPHA_OPAQUE}
+WHITE :: Color{}
+
+Padding :: struct {
+    top, bottom, left, right: i32
+}
+
+Margin :: struct {
+    top, bottom, left, right: i32
+}
+
 Element_Style :: struct {
     border_radius: f32,
     color: Color,
-    text_color: Color
+    text_color: Color,
     font_size: i32,
-    padding: Vec4,
-    margin: Vec4
+    padding: Padding,
+    margin: Margin
+}
+
+Element_Props :: struct {
+    bounds: F_Rect,
+    parent_bounds: ^F_Rect,
+    style: Element_Style,
+}
+
+Text :: struct {
+    //text: ttf.Text,
+    color: Color,
+    font_size: f32,
 }
 
 Button :: struct {
-    bounds: F_Rect,
-    label: string,
+    using element: Element_Props,
 
-    style: Style,
-
+    label: Text,
     clicked: bool,
     on_click: On_Button_Click_Proc,
 }
+
 
 @(private = "file")
 State :: struct {
@@ -41,30 +65,26 @@ State :: struct {
 
     window: ^sdl.Window,
     renderer: ^sdl.Renderer,
+    //text_engine: ^ttf.TextEngine,
 
     background_color: sdl.Color,
 
-    on_draw: Draw_Proc,
-    on_update: Update_Proc,
+    //default_font: ^ttf.Font,
+    default_font_size: f32,
+    fps: i32,
 }
 
 
 @(private = "file")
 state: ^State
 
-poll_event :: sdl.PollEvent
-
 init :: proc(
     width: i32,
     height: i32,
     title: cstring,
-    on_draw: Draw_Proc,
-    on_update: Update_Proc
 ) {
     state = new(State)
-    state.background_color = sdl.Color{0, 0, 0, sdl.ALPHA_OPAQUE} // black
-    state.on_draw = on_draw
-    state.on_update = on_update
+    state.background_color = BLACK
 
     if !sdl.Init({.VIDEO}) {
         fmt.eprintln("sdl.Init failed: ", sdl.GetError())
@@ -88,22 +108,51 @@ init :: proc(
         fmt.eprintln("Could not create a renderer: ", sdl.GetError())
         return
     }
-
-    state.running = true
 }
 
-run :: proc() {
-    for state.running {
-        event : sdl.Event
-        for sdl.PollEvent(&event) {
-            #partial switch event.type {
-            case .QUIT:
-                state.running = false
-                break
-            }
-        }
+// Let the monitor set the rate
+use_vsync :: proc() {
+    set_vsync := sdl.SetRenderVSync(state.renderer, 1)
+    if !set_vsync {
+        fmt.eprintln("Failed to set renderer VSync!")
 
-        state.on_update()
+        set_vsync_adaptive := sdl.SetRenderVSync(state.renderer, sdl.RENDERER_VSYNC_ADAPTIVE)
+        if !set_vsync_adaptive {
+            fmt.eprintln("Failed to set renderer VSync as adaptive!")
+        }
+    }
+}
+
+/*load_font :: proc(font_path: cstring, font_size: f32) {
+    if !ttf.Init() {
+        fmt.eprintln(sdl.GetError())
+        return
+    }
+
+    state.default_font = ttf.OpenFont(font_path, font_size)
+    if state.default_font == nil {
+        fmt.eprintln("Failed to open font")
+        return
+    }
+
+    state.text_engine = ttf.CreateRendererTextEngine(state.renderer)
+    if state.text_engine == nil {
+        fmt.eprintln("Failed to create renderer text engine")
+        return
+    }
+}*/
+
+
+run :: proc(
+    on_event: Event_Proc,
+    on_draw: Draw_Proc,
+    on_update: Update_Proc
+) {
+    state.running = true
+
+    for state.running {
+        on_event()
+        on_update()
 
         sdl.SetRenderDrawColor(state.renderer,
             state.background_color.r,
@@ -113,17 +162,28 @@ run :: proc() {
 
         sdl.RenderClear(state.renderer)
         // Drawing should be done between RenderClear and RenderPresent
-        state.on_draw()
+        on_draw()
 
         sdl.RenderPresent(state.renderer)
     }
 
+    shutdown()
+
 }
 
+quit :: proc() {
+    state.running = false
+}
+
+@(private = "file")
 shutdown :: proc() {
     sdl.Quit()
     sdl.DestroyWindow(state.window)
     sdl.DestroyRenderer(state.renderer)
+
+    /*ttf.DestroyRendererTextEngine(state.text_engine)
+    ttf.CloseFont(state.default_font)
+    ttf.Quit()*/
 
     free(state)
 }
@@ -162,12 +222,26 @@ draw_frect :: proc(x, y, w, h: f32, color: Color) -> F_Rect {
 	return rect
 }
 
+draw_frect_rounded :: proc(x, y, w, h: f32, color: Color) -> F_Rect {
+    // TODO
+    return {}
+}
+
+draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color) -> F_Rect {
+    return draw_frect(x, start_y, thickness, end_y - start_y, color)
+}
+
+draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Color) -> F_Rect {
+    return draw_frect(y, start_x, end_x - start_x, thickness, color)
+}
+
 check_collision_point :: proc(p: Vec2, rect: F_Rect) -> bool {
     pp: sdl.FPoint = {p.x, p.y}
     return sdl.PointInRectFloat(pp, rect)
 }
 
-button :: proc(b: ^Button) {
+// @todo: draw text
+draw_button :: proc(b: ^Button) {
     draw_frect_ex(&b.bounds, b.style.color)
 
     /*buttons, p := get_mouse_state()
