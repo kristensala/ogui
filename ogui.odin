@@ -20,6 +20,9 @@ Window_Flags :: sdl.WindowFlags
 Renderer :: sdl.Renderer
 Mouse_Button_Flags :: sdl.MouseButtonFlags
 
+close_font :: ttf.CloseFont
+destroy_text :: ttf.DestroyText
+
 // TODO: Define some common Colors
 BLACK :: Color{0, 0, 0, sdl.ALPHA_OPAQUE}
 WHITE :: Color{}
@@ -30,6 +33,12 @@ Padding :: struct {
 
 Margin :: struct {
     top, bottom, left, right: i32
+}
+
+Font_Data :: struct {
+    font: ^ttf.Font,
+    font_size: f32,
+    text_buffer: ^ttf.Text
 }
 
 Element_Style :: struct {
@@ -66,10 +75,6 @@ State :: struct {
 
 
     background_color: sdl.Color,
-
-    default_font: ^ttf.Font,
-    default_font_size: f32,
-    text_buffer: ^ttf.Text,
     fps: i32,
 }
 
@@ -127,22 +132,39 @@ use_vsync :: proc() {
     }
 }
 
-init_font :: proc(font_path: cstring, font_size: f32) {
-    if !ttf.Init() {
-        fmt.eprintln("Failed to init font: ", sdl.GetError())
-        return
+load_font :: proc(font_path: cstring, font_size: f32) -> ^Font_Data {
+    fd := new(Font_Data)
+    fd.font = ttf.OpenFont(font_path, font_size)
+
+    if fd.font == nil {
+        fmt.eprintln("Failed to open font")
+        return nil
     }
 
-    state.default_font = ttf.OpenFont(font_path, font_size)
-    if state.default_font == nil {
-        fmt.eprintln("Failed to open font")
-        return
+    fd.font_size = font_size
+    fd.text_buffer = ttf.CreateText(state.text_engine, fd.font, "", 0)
+
+    return fd
+}
+
+init_font :: proc() -> bool {
+    if !ttf.Init() {
+        fmt.eprintln("Failed to init font: ", sdl.GetError())
+        return false
     }
 
     state.text_engine = ttf.CreateRendererTextEngine(state.renderer)
-    state.text_buffer = ttf.CreateText(state.text_engine, state.default_font, "", 0)
+    if state.text_engine == nil {
+        return false
+    }
+
+    return true
 }
 
+deinit_font :: proc() {
+    ttf.DestroyRendererTextEngine(state.text_engine)
+    ttf.Quit()
+}
 
 run :: proc(
     on_event: Event_Proc,
@@ -184,13 +206,10 @@ shutdown :: proc() {
     sdl.DestroyWindow(state.window)
     sdl.DestroyRenderer(state.renderer)
 
-    ttf.DestroyText(state.text_buffer)
-    ttf.DestroyRendererTextEngine(state.text_engine)
-    ttf.CloseFont(state.default_font)
-    ttf.Quit()
 
     free(state)
 }
+
 
 set_background_color :: proc(color: Color) {
     state.background_color = color
@@ -241,10 +260,10 @@ draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Colo
     return draw_frect(y, start_x, end_x - start_x, thickness, color)
 }
 
-draw_text :: proc(s: cstring, p: Vec2, color: Color = BLACK) {
-    ttf.SetTextString(state.text_buffer, s, 0);   /* overwrite contents */
-    ttf.SetTextColor(state.text_buffer, color.r, color.g, color.b, color.a);
-    ttf.DrawRendererText(state.text_buffer, p.x, p.y);/* engine draws from its own cached atlas */
+draw_text :: proc(text: ^ttf.Text, s: cstring, p: Vec2, color: Color = BLACK) {
+    ttf.SetTextString(text, s, 0);
+    ttf.SetTextColor(text, color.r, color.g, color.b, color.a);
+    ttf.DrawRendererText(text, p.x, p.y);
 }
 
 check_collision_point :: proc(p: Vec2, rect: F_Rect) -> bool {
