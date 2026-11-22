@@ -11,7 +11,6 @@ import ttf "vendor:sdl3/ttf"
 /*
     TODO(ksala):
     - Window flags
-    - Rounded rectangle
     - Rectangle with just lines (not filled), rounded and regular
     - Some prebuilt layout options
     - Modal/Dialog
@@ -277,7 +276,10 @@ draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color) -> F_Rect {
     count    : i32 = segments * 4
 
     verts := make([^]sdl.Vertex, count + 1)
+    defer free(verts)
+
     indices := make([^]i32, count * 3)
+    defer free(indices)
 
     /* center vertex of the fan */
     verts[0].position  = sdl.FPoint{ rect.x + rect.w * 0.5, rect.y + rect.h * 0.5 }
