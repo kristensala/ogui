@@ -1,24 +1,37 @@
 package ogui
 
 import "core:fmt"
+import "core:math"
 import sdl "vendor:sdl3"
 import ttf "vendor:sdl3/ttf"
 
 // https://gist.github.com/Ivulai/2b8151e2eccc3cf2e609ef9aa0ce8c91
 // https://github.com/justinmeiners/stb-truetype-example/blob/master/stb_truetype.h
 
+/*
+    TODO(ksala):
+    - Window flags
+    - Rounded rectangle
+    - Rectangle with just lines (not filled), rounded and regular
+    - Some prebuilt layout options
+    - Modal/Dialog
+    - Dropdown button
+    - text input
+    - textarea
+    - list view
+*/
+
 @(private = "file") Draw_Proc :: proc()
 @(private = "file") Update_Proc :: proc()
 @(private = "file") Event_Proc :: proc()
 @(private = "file") On_Button_Click_Proc :: proc()
 
+M_PI :: 3.14159265358979323846
 Vec2 :: [2]f32
 Rect :: sdl.Rect
 F_Rect :: sdl.FRect
 Color :: sdl.Color
-Window_Flags :: sdl.WindowFlags
 Renderer :: sdl.Renderer
-Mouse_Button_Flags :: sdl.MouseButtonFlags
 
 close_font :: ttf.CloseFont
 destroy_text :: ttf.DestroyText
@@ -59,11 +72,10 @@ Element_Props :: struct {
 Button :: struct {
     using props: Element_Props,
 
-    label: string,
+    label: cstring,
     clicked: bool,
     on_click: On_Button_Click_Proc,
 }
-
 
 @(private = "file")
 State :: struct {
@@ -73,11 +85,9 @@ State :: struct {
     renderer: ^sdl.Renderer,
     text_engine: ^ttf.TextEngine,
 
-
     background_color: sdl.Color,
-    fps: i32,
+    max_fps: i32,
 }
-
 
 @(private = "file")
 state: ^State
@@ -87,6 +97,7 @@ init :: proc(
     width: i32,
     height: i32,
     title: cstring,
+    flags: sdl.WindowFlags = {}
 ) {
     state = new(State)
     state.background_color = BLACK
@@ -100,7 +111,7 @@ init :: proc(
         title,
         width,
         height,
-        {},
+        flags
     )
 
     if state.window == nil {
@@ -219,7 +230,7 @@ get_renderer :: proc() -> ^Renderer {
     return state.renderer
 }
 
-get_mouse_state :: proc() -> (mouse_state: Mouse_Button_Flags, pos: Vec2) {
+get_mouse_state :: proc() -> (mouse_state: sdl.MouseButtonFlags, pos: Vec2) {
     v: Vec2
     x := sdl.GetMouseState(&v.x, &v.y)
     return x, v
@@ -245,9 +256,58 @@ draw_frect :: proc(x, y, w, h: f32, color: Color) -> F_Rect {
 	return rect
 }
 
-draw_frect_rounded :: proc(x, y, w, h: f32, color: Color) -> F_Rect {
-    // TODO
-    return {}
+draw_frect_rounded_ex :: proc(rect: F_Rect, r: f32, c: Color) -> F_Rect {
+    return draw_frect_rounded(rect.x, rect.y, rect.w, rect.h, r, c)
+}
+
+draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color) -> F_Rect {
+    rect := F_Rect{x,y,w,h}
+    color := sdl.FColor{f32(c.r), f32(c.g), f32(c.b), f32(c.a)}
+
+    if (r <= 0.0) {
+        sdl.SetRenderDrawColor(state.renderer, c.r, c.g, c.b, c.a)
+        sdl.RenderFillRect(state.renderer, &rect)
+        return {}
+    }
+
+    /* clamp radius to half the smaller side */
+    radius := sdl.min(r, sdl.min(rect.w, rect.h) * 0.5)
+
+    segments : i32 = 16
+    count    : i32 = segments * 4
+
+    verts := make([^]sdl.Vertex, count + 1)
+    indices := make([^]i32, count * 3)
+
+    /* center vertex of the fan */
+    verts[0].position  = sdl.FPoint{ rect.x + rect.w * 0.5, rect.y + rect.h * 0.5 }
+    verts[0].color     = color
+    verts[0].tex_coord = sdl.FPoint{ 0.0, 0.0 };
+
+    /* corner circle centers + start angles (clockwise, from top-left) */
+    cx := [4]f32{ rect.x + radius, rect.x + rect.w - radius, rect.x + rect.w - radius, rect.x + radius }
+    cy := [4]f32{ rect.y + radius, rect.y + radius, rect.y + rect.h - radius, rect.y + rect.h - radius }
+    a0 := [4]f32{ M_PI, 3.0 * M_PI / 2.0, 0.0, M_PI / 2.0 }
+
+    n := 1
+    for c := 0; c < 4; c += 1 {
+        for i := 0; i < int(segments); i += 1 {
+            ang := a0[c] + (M_PI / 2.0) * f32(i) / f32(segments - 1)
+            verts[n].position = sdl.FPoint{ cx[c] + math.cos_f32(ang) * radius, cy[c] + math.sin_f32(ang) * radius }
+            verts[n].color = color
+            verts[n].tex_coord = sdl.FPoint{ 0.0, 0.0 }
+            n += 1
+        }
+    }
+
+    for i := 0; i < int(count); i += 1 {
+        indices[i*3 + 0] = 0
+        indices[i*3 + 1] = i32(i) + 1
+        indices[i*3 + 2] = i32(i + 1) % count + 1
+    }
+
+    sdl.RenderGeometry(state.renderer, nil, verts, count + 1, indices, count * 3);
+    return rect
 }
 
 draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color) -> F_Rect {

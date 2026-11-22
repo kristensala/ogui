@@ -37,7 +37,8 @@ main :: proc() {
     og.init(
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
-        "OGUI: a wrapper for SDL3 to build native desktop applications"
+        "OGUI: a wrapper for SDL3 to build native desktop applications",
+        sdl.WINDOW_RESIZABLE
     )
     og.use_vsync()
 
@@ -56,6 +57,7 @@ main :: proc() {
     {
         button := og.Button{
             bounds = og.F_Rect{0, 500, 100, 100},
+            label = "Button",
             style = og.Element_Style{
                 color = og.BLACK
             },
@@ -103,6 +105,9 @@ on_draw :: proc() {
 
     og.draw_text(s.fonts[20].text_buffer, "ÄÄööää", {500, 500})
     og.draw_text(s.fonts[30].text_buffer, "another text", {500, 550})
+    og.draw_text(s.fonts[30].text_buffer, "Another line of text", {500, 580})
+
+    og.draw_frect_rounded(200, 200, 100, 50, 10, og.BLACK)
 }
 
 on_click :: proc() {
