@@ -2,7 +2,10 @@ package ogui
 
 import "core:fmt"
 import sdl "vendor:sdl3"
-//import ttf "vendor:sdl3/ttf"
+import ttf "vendor:sdl3/ttf"
+
+// https://gist.github.com/Ivulai/2b8151e2eccc3cf2e609ef9aa0ce8c91
+// https://github.com/justinmeiners/stb-truetype-example/blob/master/stb_truetype.h
 
 @(private = "file") Draw_Proc :: proc()
 @(private = "file") Update_Proc :: proc()
@@ -44,16 +47,10 @@ Element_Props :: struct {
     style: Element_Style,
 }
 
-Text :: struct {
-    //text: ttf.Text,
-    color: Color,
-    font_size: f32,
-}
-
 Button :: struct {
-    using element: Element_Props,
+    using props: Element_Props,
 
-    label: Text,
+    label: string,
     clicked: bool,
     on_click: On_Button_Click_Proc,
 }
@@ -65,12 +62,14 @@ State :: struct {
 
     window: ^sdl.Window,
     renderer: ^sdl.Renderer,
-    //text_engine: ^ttf.TextEngine,
+    text_engine: ^ttf.TextEngine,
+
 
     background_color: sdl.Color,
 
-    //default_font: ^ttf.Font,
+    default_font: ^ttf.Font,
     default_font_size: f32,
+    text_buffer: ^ttf.Text,
     fps: i32,
 }
 
@@ -78,6 +77,7 @@ State :: struct {
 @(private = "file")
 state: ^State
 
+// TODO: window flags
 init :: proc(
     width: i32,
     height: i32,
@@ -110,6 +110,10 @@ init :: proc(
     }
 }
 
+// TODO:
+set_fps :: proc(fps: i32) {
+}
+
 // Let the monitor set the rate
 use_vsync :: proc() {
     set_vsync := sdl.SetRenderVSync(state.renderer, 1)
@@ -123,9 +127,9 @@ use_vsync :: proc() {
     }
 }
 
-/*load_font :: proc(font_path: cstring, font_size: f32) {
+init_font :: proc(font_path: cstring, font_size: f32) {
     if !ttf.Init() {
-        fmt.eprintln(sdl.GetError())
+        fmt.eprintln("Failed to init font: ", sdl.GetError())
         return
     }
 
@@ -136,11 +140,8 @@ use_vsync :: proc() {
     }
 
     state.text_engine = ttf.CreateRendererTextEngine(state.renderer)
-    if state.text_engine == nil {
-        fmt.eprintln("Failed to create renderer text engine")
-        return
-    }
-}*/
+    state.text_buffer = ttf.CreateText(state.text_engine, state.default_font, "", 0)
+}
 
 
 run :: proc(
@@ -151,6 +152,8 @@ run :: proc(
     state.running = true
 
     for state.running {
+        // TODO: if manual fps is set
+
         on_event()
         on_update()
 
@@ -181,9 +184,10 @@ shutdown :: proc() {
     sdl.DestroyWindow(state.window)
     sdl.DestroyRenderer(state.renderer)
 
-    /*ttf.DestroyRendererTextEngine(state.text_engine)
+    ttf.DestroyText(state.text_buffer)
+    ttf.DestroyRendererTextEngine(state.text_engine)
     ttf.CloseFont(state.default_font)
-    ttf.Quit()*/
+    ttf.Quit()
 
     free(state)
 }
@@ -228,11 +232,19 @@ draw_frect_rounded :: proc(x, y, w, h: f32, color: Color) -> F_Rect {
 }
 
 draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color) -> F_Rect {
+    assert(start_y < end_y)
     return draw_frect(x, start_y, thickness, end_y - start_y, color)
 }
 
 draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Color) -> F_Rect {
+    assert(start_x < end_x)
     return draw_frect(y, start_x, end_x - start_x, thickness, color)
+}
+
+draw_text :: proc(s: cstring, p: Vec2, color: Color = BLACK) {
+    ttf.SetTextString(state.text_buffer, s, 0);   /* overwrite contents */
+    ttf.SetTextColor(state.text_buffer, color.r, color.g, color.b, color.a);
+    ttf.DrawRendererText(state.text_buffer, p.x, p.y);/* engine draws from its own cached atlas */
 }
 
 check_collision_point :: proc(p: Vec2, rect: F_Rect) -> bool {

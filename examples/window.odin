@@ -36,6 +36,7 @@ main :: proc() {
         "OGUI: a wrapper for SDL3 to build native desktop applications"
     )
     og.use_vsync()
+    og.init_font("./assets/JetBrainsMono-Regular.ttf", 30)
 
     //og.load_font("path to font", 20)
     og.set_background_color(og.Color{20, 250, 250, 255})
@@ -45,7 +46,7 @@ main :: proc() {
         button := og.Button{
             bounds = og.F_Rect{0, 500, 100, 100},
             style = og.Element_Style{
-                color = og.Color{0,0,0,255}
+                color = og.BLACK
             },
             on_click = on_click
         }
@@ -88,6 +89,9 @@ on_draw :: proc() {
 
     og.draw_line_vertical(500, 100, 500, 2.5, og.BLACK)
     og.draw_line_horizontal(10, 50, 500, 2.5, og.BLACK)
+
+    og.draw_text("ÄÄööää", {500, 500})
+    og.draw_text("another text", {500, 550})
 }
 
 on_click :: proc() {
