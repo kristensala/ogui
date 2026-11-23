@@ -2,6 +2,7 @@ package examples
 
 import og "../"
 import sdl "vendor:sdl3"
+import "core:strings"
 
 import "core:fmt"
 
@@ -23,10 +24,11 @@ State :: struct {
     button_one: og.Button,
     elements: [dynamic]Element, // or maybe a map
 
+    input_field: og.Input_Field,
+
     font_data: ^og.Font_Data,
 
     fonts: map[f32]^og.Font_Data
-    //ui: map[UI]Element
 }
 
 s: ^State
@@ -40,6 +42,7 @@ main :: proc() {
         "OGUI: a wrapper for SDL3 to build native desktop applications",
         sdl.WINDOW_RESIZABLE
     )
+    og.start_text_input()
     og.use_vsync()
 
     if !og.init_font() {
@@ -48,23 +51,31 @@ main :: proc() {
     }
     defer og.deinit_font()
 
+    s.fonts[15] = og.load_font("./assets/JetBrainsMono-Regular.ttf", 15)
     s.fonts[20] = og.load_font("./assets/JetBrainsMono-Regular.ttf", 20)
     s.fonts[30] = og.load_font("./assets/JetBrainsMono-Regular.ttf", 30)
 
-    og.set_background_color(og.Color{20, 250, 250, 255})
+    og.set_background_color(og.SOLID_WHITE)
 
     // create ui elements
     {
         button := og.Button{
-            bounds = og.F_Rect{0, 500, 100, 100},
-            label = "Button",
+            bounds = og.F_Rect{0, 500, 200, 50},
+            label = "Label",
             style = og.Element_Style{
-                color = og.BLACK
+                color = og.RED,
+                text_color = og.BLACK
             },
             on_click = on_click
         }
 
         append(&s.elements, &button)
+
+        s.input_field = og.Input_Field{
+            bounds = og.F_Rect{10, 600, 100, 20},
+            placeholder = "Placeholder",
+            font_data = s.fonts[15],
+        }
     }
 
     // this is blocking
@@ -81,6 +92,33 @@ on_event :: proc() {
         case .QUIT:
             og.quit()
             break
+        case .TEXT_INPUT:
+            input := strings.clone_from_cstring(event.text.text)
+            defer delete(input)
+
+            builder := strings.builder_make()
+            s_input := strings.clone_from_cstring(s.input_field.input)
+            defer delete(s_input)
+
+            strings.write_string(&builder, s_input)
+            strings.write_string(&builder, input)
+
+            s.input_field.input = strings.clone_to_cstring(strings.to_string(builder))
+            strings.builder_destroy(&builder)
+            break
+        case .KEY_DOWN:
+            keycode := event.key.scancode
+            if keycode == .BACKSPACE {
+                // ::handle input field on backspace::
+                if len(s.input_field.input) > 0 {
+                    f := strings.clone_from_cstring(s.input_field.input)
+                    defer delete(f)
+
+                    f = f[:len(f)-1]
+                    s.input_field.input = strings.clone_to_cstring(f)
+                }
+            }
+            break
         }
     }
 }
@@ -95,7 +133,7 @@ on_draw :: proc() {
     for &element in s.elements {
         #partial switch v in element {
         case ^og.Button:
-            og.draw_button(v)
+            og.draw_button(v, s.fonts[15])
         }
     }
     og.draw_frect(0, 10, 100, 100, og.BLACK)
@@ -108,6 +146,10 @@ on_draw :: proc() {
     og.draw_text(s.fonts[30].text_buffer, "Another line of text", {500, 580})
 
     og.draw_frect_rounded(200, 200, 100, 50, 10, og.BLACK)
+
+    og.draw_frect_lines(300, 300, 50, 50, 2, og.BLACK)
+
+    og.draw_input_field(&s.input_field)
 }
 
 on_click :: proc() {
@@ -120,6 +162,10 @@ destroy_state :: proc() {
     for _, value in s.fonts {
         og.destroy_text(value.text_buffer)
         og.close_font(value.font)
+    }
+
+    if s.input_field.input != nil {
+        delete(s.input_field.input)
     }
 
     free(s)

@@ -10,12 +10,11 @@ import ttf "vendor:sdl3/ttf"
 
 /*
     TODO(ksala):
-    - Window flags
     - Rectangle with just lines (not filled), rounded and regular
     - Some prebuilt layout options
     - Modal/Dialog
     - Dropdown button
-    - text input
+    - text input <--- this
     - textarea
     - list view
 */
@@ -25,7 +24,7 @@ import ttf "vendor:sdl3/ttf"
 @(private = "file") Event_Proc :: proc()
 @(private = "file") On_Button_Click_Proc :: proc()
 
-M_PI :: 3.14159265358979323846
+PI :: 3.14159265358979323846
 Vec2 :: [2]f32
 Rect :: sdl.Rect
 F_Rect :: sdl.FRect
@@ -36,8 +35,12 @@ close_font :: ttf.CloseFont
 destroy_text :: ttf.DestroyText
 
 // TODO: Define some common Colors
+
+// ::Colors::
 BLACK :: Color{0, 0, 0, sdl.ALPHA_OPAQUE}
-WHITE :: Color{}
+SOLID_WHITE :: Color{255, 255, 255, sdl.ALPHA_OPAQUE_FLOAT}
+RED :: Color{255, 0, 0, sdl.ALPHA_OPAQUE_FLOAT}
+GRAY :: Color{128, 128, 128, sdl.ALPHA_OPAQUE}
 
 Padding :: struct {
     top, bottom, left, right: i32
@@ -45,6 +48,11 @@ Padding :: struct {
 
 Margin :: struct {
     top, bottom, left, right: i32
+}
+
+Cursor :: struct {
+    rect: F_Rect,
+    col_idx: i32, // position in the input string
 }
 
 Font_Data :: struct {
@@ -66,6 +74,7 @@ Element_Props :: struct {
     bounds: F_Rect,
     parent_bounds: ^F_Rect,
     style: Element_Style,
+    font_data: ^Font_Data,
 }
 
 Button :: struct {
@@ -74,6 +83,17 @@ Button :: struct {
     label: cstring,
     clicked: bool,
     on_click: On_Button_Click_Proc,
+}
+
+Input_Field :: struct {
+    using props: Element_Props,
+
+    placeholder: cstring,
+    input: cstring,
+    cursor: Cursor,
+
+    has_focus: bool,
+    on_update: #type proc()
 }
 
 @(private = "file")
@@ -86,6 +106,8 @@ State :: struct {
 
     background_color: sdl.Color,
     max_fps: i32,
+
+    default_font: ^Font_Data,
 }
 
 @(private = "file")
@@ -123,10 +145,21 @@ init :: proc(
         fmt.eprintln("Could not create a renderer: ", sdl.GetError())
         return
     }
+
+    // TODO: since sdl 3.4.x
+    //sdl.SetDefaultTextureAddressMode(state.renderer, .NEAREST)
+}
+
+start_text_input :: proc() -> bool {
+    return sdl.StartTextInput(state.window)
 }
 
 // TODO:
 set_fps :: proc(fps: i32) {
+}
+
+set_default_font :: proc(font_data: ^Font_Data) {
+    state.default_font = font_data
 }
 
 // Let the monitor set the rate
@@ -216,7 +249,6 @@ shutdown :: proc() {
     sdl.DestroyWindow(state.window)
     sdl.DestroyRenderer(state.renderer)
 
-
     free(state)
 }
 
@@ -255,7 +287,27 @@ draw_frect :: proc(x, y, w, h: f32, color: Color) -> F_Rect {
 	return rect
 }
 
-draw_frect_rounded_ex :: proc(rect: F_Rect, r: f32, c: Color) -> F_Rect {
+draw_frect_lines :: proc(x, y, w, h: f32, thickness: i32, color: Color) {
+    assert(thickness > 0)
+
+    ok := sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
+	rect: F_Rect = {x, y, w, h}
+
+    sdl.RenderRect(state.renderer, &rect)
+
+    if (thickness > 1) {
+        for i in 1..<thickness {
+            rect.x += 1
+            rect.y += 1
+            rect.w -= 2
+            rect.h -= 2
+            sdl.RenderRect(state.renderer, &rect)
+        }
+    }
+}
+
+
+draw_frect_rounded_ex :: proc(rect: ^F_Rect, r: f32, c: Color) -> F_Rect {
     return draw_frect_rounded(rect.x, rect.y, rect.w, rect.h, r, c)
 }
 
@@ -266,7 +318,7 @@ draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color) -> F_Rect {
     if (r <= 0.0) {
         sdl.SetRenderDrawColor(state.renderer, c.r, c.g, c.b, c.a)
         sdl.RenderFillRect(state.renderer, &rect)
-        return {}
+        return rect
     }
 
     /* clamp radius to half the smaller side */
@@ -289,12 +341,12 @@ draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color) -> F_Rect {
     /* corner circle centers + start angles (clockwise, from top-left) */
     cx := [4]f32{ rect.x + radius, rect.x + rect.w - radius, rect.x + rect.w - radius, rect.x + radius }
     cy := [4]f32{ rect.y + radius, rect.y + radius, rect.y + rect.h - radius, rect.y + rect.h - radius }
-    a0 := [4]f32{ M_PI, 3.0 * M_PI / 2.0, 0.0, M_PI / 2.0 }
+    a0 := [4]f32{ PI, 3.0 * PI / 2.0, 0.0, PI / 2.0 }
 
     n := 1
     for c := 0; c < 4; c += 1 {
         for i := 0; i < int(segments); i += 1 {
-            ang := a0[c] + (M_PI / 2.0) * f32(i) / f32(segments - 1)
+            ang := a0[c] + (PI / 2.0) * f32(i) / f32(segments - 1)
             verts[n].position = sdl.FPoint{ cx[c] + math.cos_f32(ang) * radius, cy[c] + math.sin_f32(ang) * radius }
             verts[n].color = color
             verts[n].tex_coord = sdl.FPoint{ 0.0, 0.0 }
@@ -319,7 +371,7 @@ draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color)
 
 draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Color) -> F_Rect {
     assert(start_x < end_x)
-    return draw_frect(y, start_x, end_x - start_x, thickness, color)
+    return draw_frect(start_x, y, end_x - start_x, thickness, color)
 }
 
 draw_text :: proc(text: ^ttf.Text, s: cstring, p: Vec2, color: Color = BLACK) {
@@ -333,16 +385,39 @@ check_collision_point :: proc(p: Vec2, rect: F_Rect) -> bool {
     return sdl.PointInRectFloat(pp, rect)
 }
 
-// @todo: draw text
-draw_button :: proc(b: ^Button) {
-    draw_frect_ex(&b.bounds, b.style.color)
+// TODO: draw text inside the button
+draw_button :: proc(b: ^Button, font_data: ^Font_Data) {
+    //draw_frect_ex(&b.bounds, b.style.color)
+    draw_frect_rounded_ex(&b.bounds, 5, b.style.color)
 
-    /*buttons, p := get_mouse_state()
-    if check_collision_point(p, b.rect) {
-        if sdl.MouseButtonFlag.LEFT in buttons {
-            on_click()
-            return
-        }
-    }*/
+    p := b.bounds
+
+    width: i32
+    height: uint
+    ttf.MeasureString(font_data.font, b.label, len(b.label), 0, &width, &height)
+
+    // TODO: center text inside the rect
+    // text gets blurry
+    center_y := p.y + (p.h / 2) - ((font_data.font_size / 2.0) + f32(height))
+    center_x := p.x + (p.w / 2) - (f32(width) / 2)
+
+    draw_text(font_data.text_buffer, b.label, {center_x, center_y}, b.style.text_color)
+}
+
+draw_input_field :: proc(i: ^Input_Field) {
+    if len(i.input) != 0 {
+        draw_text(i.font_data.text_buffer, i.input, {i.bounds.x, i.bounds.y})
+    } else {
+        draw_text(i.font_data.text_buffer, i.placeholder, {i.bounds.x, i.bounds.y}, GRAY)
+    }
+
+    width: i32
+    length: uint
+    ttf.MeasureString(i.font_data.font, i.input, len(i.input), 0, &width, &length)
+
+    x := i.bounds.x + f32(width)
+    draw_frect(x, i.bounds.y + 2, 2, 15, BLACK)
+
+    draw_line_horizontal(i.bounds.y + i.bounds.h, i.bounds.x, i.bounds.x + i.bounds.w, 2, BLACK)
 
 }
