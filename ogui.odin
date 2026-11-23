@@ -416,8 +416,8 @@ draw_input_field :: proc(i: ^Input_Field) {
     ttf.MeasureString(i.font_data.font, i.input, len(i.input), 0, &width, &length)
 
     x := i.bounds.x + f32(width)
-    draw_frect(x, i.bounds.y + 2, 2, 15, BLACK)
+    draw_frect(x, i.bounds.y + 2, 2, i.font_data.font_size, BLACK)
 
-    draw_line_horizontal(i.bounds.y + i.bounds.h, i.bounds.x, i.bounds.x + i.bounds.w, 2, BLACK)
+    draw_line_horizontal(i.bounds.y + i.font_data.font_size + 5, i.bounds.x, i.bounds.x + i.bounds.w, 2, BLACK)
 
 }
