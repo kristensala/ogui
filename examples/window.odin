@@ -20,15 +20,18 @@ Element :: union {
     ^og.F_Rect
 }
 
-State :: struct {
+Gui_Elements :: struct {
     button_one: og.Button,
-    elements: [dynamic]Element, // or maybe a map
-
     input_field: og.Input_Field,
+    command_palette: og.Modal,
 
+    elements: [dynamic]Element, // or maybe a map
+}
+
+State :: struct {
     font_data: ^og.Font_Data,
-
-    fonts: map[f32]^og.Font_Data
+    fonts: map[f32]^og.Font_Data,
+    gui: Gui_Elements
 }
 
 s: ^State
@@ -59,22 +62,31 @@ main :: proc() {
 
     // create ui elements
     {
-        button := og.Button{
-            bounds = og.F_Rect{0, 500, 200, 50},
-            label = "Label",
-            style = og.Element_Style{
+        button := og.new_button(
+            og.F_Rect{0, 500, 200, 50},
+            "Button",
+            { color = og.RED, text_color = og.BLACK },
+            s.fonts[20])
+
+        append(&s.gui.elements, &button)
+
+        s.gui.input_field = og.new_input_field(
+            og.F_Rect{10, 75, 200, 20},
+            nil,
+            "Search",
+            {},
+            s.fonts[15])
+
+        s.gui.command_palette = og.Modal{
+            is_open = false,
+            show_backdrop = true,
+            modal_height = 500,
+            modal_width = 500,
+            draw_content = draw_command_palette_content,
+            style = {
+                border_radius = 10,
                 color = og.RED,
-                text_color = og.BLACK
-            },
-            on_click = on_click
-        }
-
-        append(&s.elements, &button)
-
-        s.input_field = og.Input_Field{
-            bounds = og.F_Rect{10, 600, 100, 20},
-            placeholder = "Placeholder",
-            font_data = s.fonts[15],
+            }
         }
     }
 
@@ -93,30 +105,38 @@ on_event :: proc() {
             og.quit()
             break
         case .TEXT_INPUT:
-            input := strings.clone_from_cstring(event.text.text)
-            defer delete(input)
+            {
+                // :: update input_field input ::
+                input := strings.clone_from_cstring(event.text.text)
+                defer delete(input)
 
-            builder := strings.builder_make()
-            s_input := strings.clone_from_cstring(s.input_field.input)
-            defer delete(s_input)
+                builder := strings.builder_make()
+                copy := strings.clone_from_cstring(s.gui.input_field.input)
+                defer delete(copy)
 
-            strings.write_string(&builder, s_input)
-            strings.write_string(&builder, input)
+                strings.write_string(&builder, copy)
+                strings.write_string(&builder, input)
 
-            s.input_field.input = strings.clone_to_cstring(strings.to_string(builder))
-            strings.builder_destroy(&builder)
+                s.gui.input_field.input = strings.clone_to_cstring(strings.to_string(builder))
+                strings.builder_destroy(&builder)
+            }
             break
         case .KEY_DOWN:
             keycode := event.key.scancode
             if keycode == .BACKSPACE {
                 // ::handle input field on backspace::
-                if len(s.input_field.input) > 0 {
-                    f := strings.clone_from_cstring(s.input_field.input)
+                if len(s.gui.input_field.input) > 0 {
+                    f := strings.clone_from_cstring(s.gui.input_field.input)
                     defer delete(f)
 
                     f = f[:len(f)-1]
-                    s.input_field.input = strings.clone_to_cstring(f)
+                    s.gui.input_field.input = strings.clone_to_cstring(f)
                 }
+            }
+
+            // testing
+            if keycode == .RETURN {
+                s.gui.command_palette.is_open = !s.gui.command_palette.is_open
             }
             break
         }
@@ -130,26 +150,24 @@ on_update :: proc() {
 }
 
 on_draw :: proc() {
-    for &element in s.elements {
+    og.draw_text(s.fonts[30].text_buffer, "Some examples", {10, 10})
+    /*for &element in s.gui.elements {
         #partial switch v in element {
         case ^og.Button:
-            og.draw_button(v, s.fonts[15])
+            og.draw_button(v)
         }
-    }
-    og.draw_frect(0, 10, 100, 100, og.BLACK)
+    }*/
+    og.draw_input_field(&s.gui.input_field)
 
-    og.draw_line_vertical(500, 100, 500, 2.5, og.BLACK)
-    og.draw_line_horizontal(10, 50, 500, 2.5, og.BLACK)
+    og.draw_text(s.fonts[30].text_buffer, "Geometry", {10, 120})
+    og.draw_frect(10, 170, 50, 50, og.BLACK)
+    og.draw_frect_rounded(80, 170, 50, 50, 10, og.BLACK)
+    og.draw_frect_lines(150, 170, 50, 50, 2, og.BLACK)
 
-    og.draw_text(s.fonts[20].text_buffer, "ÄÄööää", {500, 500})
-    og.draw_text(s.fonts[30].text_buffer, "another text", {500, 550})
-    og.draw_text(s.fonts[30].text_buffer, "Another line of text", {500, 580})
+    og.draw_line_vertical(220, 170, 300, 2.5, og.BLACK)
+    og.draw_line_horizontal(170, 290, 520, 2.5, og.BLACK)
 
-    og.draw_frect_rounded(200, 200, 100, 50, 10, og.BLACK)
-
-    og.draw_frect_lines(300, 300, 50, 50, 2, og.BLACK)
-
-    og.draw_input_field(&s.input_field)
+    og.draw_modal(&s.gui.command_palette)
 }
 
 on_click :: proc() {
@@ -157,17 +175,25 @@ on_click :: proc() {
 }
 
 destroy_state :: proc() {
-    delete(s.elements)
+    delete(s.gui.elements)
 
     for _, value in s.fonts {
         og.destroy_text(value.text_buffer)
         og.close_font(value.font)
+        free(value)
     }
 
-    if s.input_field.input != nil {
-        delete(s.input_field.input)
+    if s.gui.input_field.input != nil {
+        delete(s.gui.input_field.input)
     }
 
     free(s)
+}
+
+draw_command_palette_content :: proc(m: ^og.Modal) {
+    bounds := m.content_bounds
+
+    vec := og.Vec2{bounds.x + 10, bounds.y + 10}
+    og.draw_text(s.fonts[20].text_buffer, "This is modal", vec)
 }
 

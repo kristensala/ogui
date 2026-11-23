@@ -38,8 +38,8 @@ destroy_text :: ttf.DestroyText
 
 // ::Colors::
 BLACK :: Color{0, 0, 0, sdl.ALPHA_OPAQUE}
-SOLID_WHITE :: Color{255, 255, 255, sdl.ALPHA_OPAQUE_FLOAT}
-RED :: Color{255, 0, 0, sdl.ALPHA_OPAQUE_FLOAT}
+SOLID_WHITE :: Color{255, 255, 255, 255}
+RED :: Color{255, 0, 0, 255}
 GRAY :: Color{128, 128, 128, sdl.ALPHA_OPAQUE}
 
 Padding :: struct {
@@ -96,6 +96,18 @@ Input_Field :: struct {
     on_update: #type proc()
 }
 
+Modal :: struct {
+    using props: Element_Props,
+    is_open: bool,
+    show_backdrop: bool,
+
+    modal_width: f32,
+    modal_height: f32,
+
+    content_bounds: F_Rect,
+    draw_content: #type proc(m: ^Modal),
+}
+
 @(private = "file")
 State :: struct {
     running: bool,
@@ -148,18 +160,22 @@ init :: proc(
 
     // TODO: since sdl 3.4.x
     //sdl.SetDefaultTextureAddressMode(state.renderer, .NEAREST)
+
+    // enabled trasparent colors
+    sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_BLEND);
+
 }
 
 start_text_input :: proc() -> bool {
     return sdl.StartTextInput(state.window)
 }
 
-// TODO:
-set_fps :: proc(fps: i32) {
-}
-
 set_default_font :: proc(font_data: ^Font_Data) {
     state.default_font = font_data
+}
+
+// TODO:
+set_fps :: proc(fps: i32) {
 }
 
 // Let the monitor set the rate
@@ -252,9 +268,14 @@ shutdown :: proc() {
     free(state)
 }
 
-
 set_background_color :: proc(color: Color) {
     state.background_color = color
+}
+
+get_window_size :: proc() -> (w: i32, h: i32) {
+    width, height: i32
+    sdl.GetWindowSize(state.window, &width, &height)
+    return width, height
 }
 
 get_renderer :: proc() -> ^Renderer {
@@ -305,7 +326,6 @@ draw_frect_lines :: proc(x, y, w, h: f32, thickness: i32, color: Color) {
         }
     }
 }
-
 
 draw_frect_rounded_ex :: proc(rect: ^F_Rect, r: f32, c: Color) -> F_Rect {
     return draw_frect_rounded(rect.x, rect.y, rect.w, rect.h, r, c)
@@ -385,8 +405,18 @@ check_collision_point :: proc(p: Vec2, rect: F_Rect) -> bool {
     return sdl.PointInRectFloat(pp, rect)
 }
 
+@(require_results)
+new_button :: proc(bounds: F_Rect, label: cstring, style: Element_Style, font_data: ^Font_Data) -> Button {
+    return Button{
+        bounds = bounds,
+        label = label,
+        style = style,
+        font_data = font_data
+    }
+}
+
 // TODO: draw text inside the button
-draw_button :: proc(b: ^Button, font_data: ^Font_Data) {
+draw_button :: proc(b: ^Button) {
     //draw_frect_ex(&b.bounds, b.style.color)
     draw_frect_rounded_ex(&b.bounds, 5, b.style.color)
 
@@ -394,14 +424,25 @@ draw_button :: proc(b: ^Button, font_data: ^Font_Data) {
 
     width: i32
     height: uint
-    ttf.MeasureString(font_data.font, b.label, len(b.label), 0, &width, &height)
+    ttf.MeasureString(b.font_data.font, b.label, len(b.label), 0, &width, &height)
 
     // TODO: center text inside the rect
     // text gets blurry
-    center_y := p.y + (p.h / 2) - ((font_data.font_size / 2.0) + f32(height))
+    center_y := p.y + (p.h / 2) - ((b.font_data.font_size / 2.0) + f32(height))
     center_x := p.x + (p.w / 2) - (f32(width) / 2)
 
-    draw_text(font_data.text_buffer, b.label, {center_x, center_y}, b.style.text_color)
+    draw_text(b.font_data.text_buffer, b.label, {center_x, center_y}, b.style.text_color)
+}
+
+@(require_results)
+new_input_field :: proc(bounds: F_Rect, input: cstring, placeholder: cstring, style: Element_Style, fd: ^Font_Data) -> Input_Field {
+    return Input_Field{
+        bounds = bounds,
+        input = input,
+        placeholder = placeholder,
+        font_data = fd,
+        style = style
+    }
 }
 
 draw_input_field :: proc(i: ^Input_Field) {
@@ -419,5 +460,28 @@ draw_input_field :: proc(i: ^Input_Field) {
     draw_frect(x, i.bounds.y + 2, 2, i.font_data.font_size, BLACK)
 
     draw_line_horizontal(i.bounds.y + i.font_data.font_size + 5, i.bounds.x, i.bounds.x + i.bounds.w, 2, BLACK)
+}
 
+draw_modal :: proc(m: ^Modal) {
+    if !m.is_open do return
+
+    ww, wh := get_window_size()
+
+    if m.show_backdrop {
+        backdrop := F_Rect{0, 0, f32(ww), f32(wh)}
+        draw_frect_ex(&backdrop, Color{0, 0, 0, 150})
+    }
+
+    mx := f32(ww / 2) - (m.modal_width / 2)
+    my := f32(wh / 2) - (m.modal_height / 2)
+
+    m.content_bounds = F_Rect{mx, my, m.modal_width, m.modal_height}
+    if m.style.border_radius > 0 {
+        draw_frect_rounded_ex(&m.content_bounds, m.style.border_radius, m.style.color)
+    } else {
+        draw_frect_ex(&m.content_bounds, m.style.color)
+    }
+     
+
+    m.draw_content(m)
 }
