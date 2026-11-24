@@ -40,14 +40,14 @@ destroy_text :: ttf.DestroyText
 BLACK :: Color{0, 0, 0, sdl.ALPHA_OPAQUE}
 SOLID_WHITE :: Color{255, 255, 255, 255}
 RED :: Color{255, 0, 0, 255}
-GRAY :: Color{128, 128, 128, sdl.ALPHA_OPAQUE}
+GRAY :: Color{128, 128, 128, 255}
 
 Padding :: struct {
-    top, bottom, left, right: i32
+    top, bottom, left, right: f32
 }
 
 Margin :: struct {
-    top, bottom, left, right: i32
+    top, bottom, left, right: f32
 }
 
 Cursor :: struct {
@@ -62,10 +62,14 @@ Font_Data :: struct {
 }
 
 Element_Style :: struct {
+    border: f32,
+    border_color: Color,
     border_radius: f32,
-    color: Color,
+
+    color: Color, // TODO: rename to bg_color
     text_color: Color,
     font_size: i32,
+
     padding: Padding,
     margin: Margin
 }
@@ -98,11 +102,12 @@ Input_Field :: struct {
 
 Modal :: struct {
     using props: Element_Props,
+
     is_open: bool,
     show_backdrop: bool,
 
-    modal_width: f32,
-    modal_height: f32,
+    width: f32,
+    height: f32,
 
     content_bounds: F_Rect,
     draw_content: #type proc(m: ^Modal),
@@ -272,9 +277,9 @@ set_background_color :: proc(color: Color) {
     state.background_color = color
 }
 
-get_window_size :: proc() -> (w: i32, h: i32) {
+get_window_size :: proc(window := state.window) -> (w: i32, h: i32) {
     width, height: i32
-    sdl.GetWindowSize(state.window, &width, &height)
+    sdl.GetWindowSize(window, &width, &height)
     return width, height
 }
 
@@ -288,33 +293,33 @@ get_mouse_state :: proc() -> (mouse_state: sdl.MouseButtonFlags, pos: Vec2) {
     return x, v
 }
 
-draw_frect_ex :: proc(rect: ^F_Rect, color: Color) {
-    ok := sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
+draw_frect_ex :: proc(rect: ^F_Rect, color: Color, renderer := state.renderer) {
+    ok := sdl.SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a)
 	if !ok {
 		fmt.eprintln("Could not set the rect color: ", sdl.GetError())
 	}
 
-	sdl.RenderFillRect(state.renderer, rect)
+	sdl.RenderFillRect(renderer, rect)
 }
 
-draw_frect :: proc(x, y, w, h: f32, color: Color) -> F_Rect {
-    ok := sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
+draw_frect :: proc(x, y, w, h: f32, color: Color, renderer := state.renderer) -> F_Rect {
+    ok := sdl.SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a)
 	if !ok {
 		fmt.eprintln("Could not set the rect color: ", sdl.GetError())
 	}
 
 	rect: F_Rect = {x, y, w, h}
-	sdl.RenderFillRect(state.renderer, &rect)
+	sdl.RenderFillRect(renderer, &rect)
 	return rect
 }
 
-draw_frect_lines :: proc(x, y, w, h: f32, thickness: i32, color: Color) {
+draw_frect_lines :: proc(x, y, w, h: f32, thickness: i32, color: Color, renderer := state.renderer) {
     assert(thickness > 0)
 
-    ok := sdl.SetRenderDrawColor(state.renderer, color.r, color.g, color.b, color.a)
+    ok := sdl.SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a)
 	rect: F_Rect = {x, y, w, h}
 
-    sdl.RenderRect(state.renderer, &rect)
+    sdl.RenderRect(renderer, &rect)
 
     if (thickness > 1) {
         for i in 1..<thickness {
@@ -322,22 +327,22 @@ draw_frect_lines :: proc(x, y, w, h: f32, thickness: i32, color: Color) {
             rect.y += 1
             rect.w -= 2
             rect.h -= 2
-            sdl.RenderRect(state.renderer, &rect)
+            sdl.RenderRect(renderer, &rect)
         }
     }
 }
 
-draw_frect_rounded_ex :: proc(rect: ^F_Rect, r: f32, c: Color) -> F_Rect {
-    return draw_frect_rounded(rect.x, rect.y, rect.w, rect.h, r, c)
+draw_frect_rounded_ex :: proc(rect: ^F_Rect, r: f32, c: Color, renderer := state.renderer) -> F_Rect {
+    return draw_frect_rounded(rect.x, rect.y, rect.w, rect.h, r, c, renderer)
 }
 
-draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color) -> F_Rect {
+draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color, renderer := state.renderer) -> F_Rect {
     rect := F_Rect{x,y,w,h}
     color := sdl.FColor{f32(c.r), f32(c.g), f32(c.b), f32(c.a)}
 
     if (r <= 0.0) {
-        sdl.SetRenderDrawColor(state.renderer, c.r, c.g, c.b, c.a)
-        sdl.RenderFillRect(state.renderer, &rect)
+        sdl.SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a)
+        sdl.RenderFillRect(renderer, &rect)
         return rect
     }
 
@@ -380,18 +385,18 @@ draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color) -> F_Rect {
         indices[i*3 + 2] = i32(i + 1) % count + 1
     }
 
-    sdl.RenderGeometry(state.renderer, nil, verts, count + 1, indices, count * 3);
+    sdl.RenderGeometry(renderer, nil, verts, count + 1, indices, count * 3);
     return rect
 }
 
-draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color) -> F_Rect {
+draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color, renderer := state.renderer) -> F_Rect {
     assert(start_y < end_y)
-    return draw_frect(x, start_y, thickness, end_y - start_y, color)
+    return draw_frect(x, start_y, thickness, end_y - start_y, color, renderer)
 }
 
-draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Color) -> F_Rect {
+draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Color, renderer := state.renderer) -> F_Rect {
     assert(start_x < end_x)
-    return draw_frect(start_x, y, end_x - start_x, thickness, color)
+    return draw_frect(start_x, y, end_x - start_x, thickness, color, renderer)
 }
 
 draw_text :: proc(text: ^ttf.Text, s: cstring, p: Vec2, color: Color = BLACK) {
@@ -472,13 +477,34 @@ draw_modal :: proc(m: ^Modal) {
         draw_frect_ex(&backdrop, Color{0, 0, 0, 150})
     }
 
-    mx := f32(ww / 2) - (m.modal_width / 2)
-    my := f32(wh / 2) - (m.modal_height / 2)
+    mx := f32(ww / 2) - (m.width / 2)
+    my := f32(wh / 2) - (m.height / 2)
 
-    m.content_bounds = F_Rect{mx, my, m.modal_width, m.modal_height}
+    if m.style.margin.top > 0 {
+        my = m.style.margin.top
+    }
+
+    border_rect : F_Rect
+    if m.style.border > 0 {
+        border_rect = m.content_bounds
+        border_rect.x -= m.style.border
+        border_rect.y -= m.style.border
+        border_rect.w += m.style.border * 2
+        border_rect.h += m.style.border * 2
+    }
+
+    m.content_bounds = F_Rect{mx, my, m.width, m.height}
     if m.style.border_radius > 0 {
+        if m.style.border > 0 {
+            draw_frect_rounded_ex(&border_rect, m.style.border_radius, m.style.border_color)
+        }
+
         draw_frect_rounded_ex(&m.content_bounds, m.style.border_radius, m.style.color)
     } else {
+        if m.style.border > 0 {
+            draw_frect_ex(&border_rect, m.style.border_color)
+        }
+
         draw_frect_ex(&m.content_bounds, m.style.color)
     }
      

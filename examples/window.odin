@@ -60,41 +60,45 @@ main :: proc() {
 
     og.set_background_color(og.SOLID_WHITE)
 
-    // create ui elements
-    {
-        button := og.new_button(
-            og.F_Rect{0, 500, 200, 50},
-            "Button",
-            { color = og.RED, text_color = og.BLACK },
-            s.fonts[20])
-
-        append(&s.gui.elements, &button)
-
-        s.gui.input_field = og.new_input_field(
-            og.F_Rect{10, 75, 200, 20},
-            nil,
-            "Search",
-            {},
-            s.fonts[15])
-
-        s.gui.command_palette = og.Modal{
-            is_open = false,
-            show_backdrop = true,
-            modal_height = 500,
-            modal_width = 500,
-            draw_content = draw_command_palette_content,
-            style = {
-                border_radius = 10,
-                color = og.RED,
-            }
-        }
-    }
+    register_gui()
 
     // this is blocking
     og.run(on_event, on_draw, on_update)
 
     destroy_state()
     fmt.println("Shutdown...")
+}
+
+register_gui :: proc() {
+    button := og.new_button(
+        og.F_Rect{0, 500, 200, 50},
+        "Button",
+        { color = og.RED, text_color = og.BLACK },
+        s.fonts[20])
+
+    append(&s.gui.elements, &button)
+
+    s.gui.input_field = og.new_input_field(
+        og.F_Rect{10, 75, 200, 20},
+        nil,
+        "Search",
+        {},
+        s.fonts[15])
+
+    s.gui.command_palette = og.Modal{
+        is_open = false,
+        show_backdrop = true,
+        height = 1000,
+        width = 500,
+        draw_content = draw_command_palette_content,
+        style = {
+            border = 3,
+            border_color = og.BLACK,
+            border_radius = 10,
+            color = og.GRAY,
+            margin = { top = 50 }
+        }
+    }
 }
 
 on_event :: proc() {
@@ -164,11 +168,19 @@ on_draw :: proc() {
     og.draw_frect_rounded(80, 170, 50, 50, 10, og.BLACK)
     og.draw_frect_lines(150, 170, 50, 50, 2, og.BLACK)
 
-    og.draw_line_vertical(220, 170, 300, 2.5, og.BLACK)
+    og.draw_line_vertical(220, 170, 300, 10, og.BLACK)
     og.draw_line_horizontal(170, 290, 520, 2.5, og.BLACK)
 
     og.draw_modal(&s.gui.command_palette)
 }
+
+draw_command_palette_content :: proc(m: ^og.Modal) {
+    bounds := m.content_bounds
+
+    vec := og.Vec2{bounds.x + 10, bounds.y + 10}
+    og.draw_text(s.fonts[20].text_buffer, "This is modal content", vec)
+}
+
 
 on_click :: proc() {
     fmt.println("clicked")
@@ -188,12 +200,5 @@ destroy_state :: proc() {
     }
 
     free(s)
-}
-
-draw_command_palette_content :: proc(m: ^og.Modal) {
-    bounds := m.content_bounds
-
-    vec := og.Vec2{bounds.x + 10, bounds.y + 10}
-    og.draw_text(s.fonts[20].text_buffer, "This is modal", vec)
 }
 
