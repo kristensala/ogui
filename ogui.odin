@@ -330,13 +330,13 @@ draw_frect_rounded_ex :: proc(rect: ^sdl.FRect, r: f32, c: Color, renderer := st
 // draws smooth corners
 // anti-aliasing
 // this texture should be cached. (w, h, scale, radius)
-bake_rounded_rect_to_texture :: proc(rect: ^sdl.FRect, scale: i32, radius: f32, color: sdl.Color) -> ^sdl.Texture {
+bake_rounded_rect_to_texture :: proc(w, h: f32, scale: i32, radius: f32, color: sdl.Color) -> ^sdl.Texture {
     upscaled_texture := sdl.CreateTexture(
                  state.renderer,
                  sdl.PixelFormat.RGBA8888,
                  sdl.TextureAccess.TARGET,
-                 i32(rect.w) * scale,
-                 i32(rect.h) * scale)
+                 i32(w) * scale,
+                 i32(h) * scale)
 
     ensure(upscaled_texture != nil)
 
@@ -344,8 +344,8 @@ bake_rounded_rect_to_texture :: proc(rect: ^sdl.FRect, scale: i32, radius: f32, 
                  state.renderer,
                  sdl.PixelFormat.RGBA8888,
                  sdl.TextureAccess.TARGET,
-                 i32(rect.w),
-                 i32(rect.h))
+                 i32(w),
+                 i32(h))
 
     if final_texture == nil {
         sdl.DestroyTexture(upscaled_texture)
@@ -360,14 +360,16 @@ bake_rounded_rect_to_texture :: proc(rect: ^sdl.FRect, scale: i32, radius: f32, 
     sdl.SetRenderDrawColor(state.renderer, 0,0,0,0) // transparent
     sdl.RenderClear(state.renderer)
 
-    big := sdl.FRect{ 0, 0, rect.w * f32(scale), rect.h * f32(scale) }
-    draw_frect_rounded_ex(&big, radius * f32(scale), color)
+    big := sdl.FRect{ 0, 0, w * f32(scale), h * f32(scale) }
+    //draw_frect_rounded_ex(&big, radius * f32(scale), color)
+    draw_frect_rounded_top_ex(big, radius * f32(scale), color)
+
 
     // downsample
     sdl.SetRenderTarget(state.renderer, final_texture)
     sdl.SetRenderDrawColor(state.renderer, 0, 0, 0, 0)
     sdl.RenderClear(state.renderer);
-    dst := sdl.FRect{ 0, 0, rect.w, rect.h }
+    dst := sdl.FRect{ 0, 0, w, h }
     sdl.RenderTexture(state.renderer, upscaled_texture, nil, &dst)
 
     sdl.SetRenderTarget(state.renderer, render_target)
@@ -427,6 +429,10 @@ draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color, renderer := state.
     sdl.RenderGeometry(renderer, nil, verts, count + 1, indices, count * 3);
 
     return rect
+}
+
+draw_frect_rounded_top_ex :: proc(rect: sdl.FRect, radius: f32, c: Color, renderer := state.renderer) -> sdl.FRect {
+    return draw_frect_rounded_top(rect.x, rect.y, rect.w, rect.h, radius, c, renderer)
 }
 
 draw_frect_rounded_top :: proc(x, y, w, h: f32, radius: f32, c: Color, renderer := state.renderer) -> sdl.FRect {

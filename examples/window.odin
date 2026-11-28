@@ -21,6 +21,11 @@ Element :: union {
     ^sdl.FRect
 }
 
+Panel :: struct {
+    texture: ^sdl.Texture,
+    bounds: sdl.FRect,
+}
+
 Gui_Elements :: struct {
     button_one: og.Button,
     input_field: og.Input_Field,
@@ -28,7 +33,7 @@ Gui_Elements :: struct {
 
     elements: [dynamic]Element, // or maybe a map
 
-    smooth_corner_rect: ^sdl.Texture,
+    panel: Panel
 }
 
 Viewport :: enum {
@@ -116,7 +121,10 @@ register_gui :: proc() {
         }
     }
 
-    s.gui.smooth_corner_rect = og.bake_rounded_rect_to_texture(&sdl.FRect{500, 500, 500, 500}, 2, 90, og.BLACK)
+    s.gui.panel = Panel{
+        bounds = {500, 500, 200, 50}
+    }
+    s.gui.panel.texture = og.bake_rounded_rect_to_texture(s.gui.panel.bounds.w, s.gui.panel.bounds.h, 2, 15, og.BLACK)
 }
 
 on_event :: proc() {
@@ -213,9 +221,13 @@ on_draw :: proc() {
 
         og.draw_modal(&s.gui.command_palette)
 
+        // anti-alias rounder corners
+        sdl.RenderTexture(og.renderer(), s.gui.panel.texture, nil, &s.gui.panel.bounds)
 
-        dst := sdl.FRect{500, 500, 500, 500}
-        sdl.RenderTexture(og.renderer(), s.gui.smooth_corner_rect, nil, &dst)
+        // no AA rounded cornerns
+        og.draw_frect_rounded_top(710, 500, 200, 50, 15, og.BLACK)
+
+
     }
 
     if s.active_viewport == .Settings {
@@ -237,7 +249,7 @@ on_click :: proc() {
 
 destroy_state :: proc() {
     delete(s.gui.elements)
-    sdl.DestroyTexture(s.gui.smooth_corner_rect)
+    sdl.DestroyTexture(s.gui.panel.texture)
 
     for _, value in s.fonts {
         ttf.DestroyText(value.text_buffer)
