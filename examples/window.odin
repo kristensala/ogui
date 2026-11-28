@@ -2,6 +2,7 @@ package examples
 
 import og "../"
 import sdl "vendor:sdl3"
+import ttf "vendor:sdl3/ttf"
 import "core:strings"
 
 import "core:fmt"
@@ -17,7 +18,7 @@ UI :: enum {
 
 Element :: union {
     ^og.Button,
-    ^og.F_Rect
+    ^sdl.FRect
 }
 
 Gui_Elements :: struct {
@@ -26,9 +27,18 @@ Gui_Elements :: struct {
     command_palette: og.Modal,
 
     elements: [dynamic]Element, // or maybe a map
+
+    smooth_corner_rect: ^sdl.Texture,
+}
+
+Viewport :: enum {
+    Main,
+    Settings
 }
 
 State :: struct {
+    active_viewport: Viewport,
+
     font_data: ^og.Font_Data,
     fonts: map[f32]^og.Font_Data,
     gui: Gui_Elements
@@ -38,27 +48,33 @@ s: ^State
 
 main :: proc() {
     s = new(State)
+    s.active_viewport = .Main
 
-    og.init(
+    ok := og.init(
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
         "OGUI: a wrapper for SDL3 to build native desktop applications",
-        sdl.WINDOW_RESIZABLE
-    )
-    og.start_text_input()
+        sdl.WINDOW_RESIZABLE)
+
+    ensure(ok)
+
+    sdl.SetRenderDrawBlendMode(og.renderer(), sdl.BLENDMODE_BLEND);
+    og.set_background_color(og.SOLID_WHITE)
+
+    ok = sdl.StartTextInput(og.window())
+    ensure(ok)
+
     og.use_vsync()
 
-    if !og.init_font() {
+    if !og.init_text_engine() {
         fmt.eprintln("Failed to init font")
         return
     }
-    defer og.deinit_font()
+    defer og.destroy_text_engine()
 
     s.fonts[15] = og.load_font("./assets/JetBrainsMono-Regular.ttf", 15)
     s.fonts[20] = og.load_font("./assets/JetBrainsMono-Regular.ttf", 20)
     s.fonts[30] = og.load_font("./assets/JetBrainsMono-Regular.ttf", 30)
-
-    og.set_background_color(og.SOLID_WHITE)
 
     register_gui()
 
@@ -71,15 +87,15 @@ main :: proc() {
 
 register_gui :: proc() {
     button := og.new_button(
-        og.F_Rect{0, 500, 200, 50},
+        sdl.FRect{0, 500, 200, 50},
         "Button",
-        { color = og.RED, text_color = og.BLACK },
+        { bg_color = og.RED, text_color = og.BLACK },
         s.fonts[20])
 
     append(&s.gui.elements, &button)
 
     s.gui.input_field = og.new_input_field(
-        og.F_Rect{10, 75, 200, 20},
+        sdl.FRect{10, 75, 200, 20},
         nil,
         "Search",
         {},
@@ -95,10 +111,12 @@ register_gui :: proc() {
             border = 3,
             border_color = og.BLACK,
             border_radius = 10,
-            color = og.GRAY,
+            bg_color = og.RED,
             margin = { top = 50 }
         }
     }
+
+    s.gui.smooth_corner_rect = og.bake_rounded_rect_to_texture(&sdl.FRect{500, 500, 500, 500}, 2, 90, og.BLACK)
 }
 
 on_event :: proc() {
@@ -109,7 +127,7 @@ on_event :: proc() {
             og.quit()
             break
         case .TEXT_INPUT:
-            {
+            if s.active_viewport == .Main {
                 // :: update input_field input ::
                 input := strings.clone_from_cstring(event.text.text)
                 defer delete(input)
@@ -128,19 +146,38 @@ on_event :: proc() {
         case .KEY_DOWN:
             keycode := event.key.scancode
             if keycode == .BACKSPACE {
-                // ::handle input field on backspace::
-                if len(s.gui.input_field.input) > 0 {
-                    f := strings.clone_from_cstring(s.gui.input_field.input)
-                    defer delete(f)
+                if s.active_viewport == .Main {
+                    // ::handle input field on backspace::
+                    if len(s.gui.input_field.input) > 0 {
+                        f := strings.clone_from_cstring(s.gui.input_field.input)
+                        defer delete(f)
 
-                    f = f[:len(f)-1]
-                    s.gui.input_field.input = strings.clone_to_cstring(f)
+                        f = f[:len(f)-1]
+                        s.gui.input_field.input = strings.clone_to_cstring(f)
+                    }
                 }
             }
 
-            // testing
+            // TODO: ctrl+p to open
             if keycode == .RETURN {
-                s.gui.command_palette.is_open = !s.gui.command_palette.is_open
+                if !s.gui.command_palette.is_open {
+                    s.gui.command_palette.is_open = true
+                }
+            }
+
+            if keycode == .ESCAPE {
+                if s.gui.command_palette.is_open {
+                    s.gui.command_palette.is_open = false
+                }
+            }
+
+            // toggle between viewports example
+            if keycode == .TAB {
+                if s.active_viewport == .Main {
+                    s.active_viewport = .Settings
+                } else {
+                    s.active_viewport = .Main
+                }
             }
             break
         }
@@ -154,24 +191,36 @@ on_update :: proc() {
 }
 
 on_draw :: proc() {
-    og.draw_text(s.fonts[30].text_buffer, "Some examples", {10, 10})
-    /*for &element in s.gui.elements {
-        #partial switch v in element {
-        case ^og.Button:
-            og.draw_button(v)
-        }
-    }*/
-    og.draw_input_field(&s.gui.input_field)
+    if s.active_viewport == .Main {
+        og.draw_text(s.fonts[30].text_buffer, "Main viewport", {10, 10})
+        /*for &element in s.gui.elements {
+            #partial switch v in element {
+            case ^og.Button:
+                og.draw_button(v)
+                }
+            }*/
+        og.draw_input_field(&s.gui.input_field)
 
-    og.draw_text(s.fonts[30].text_buffer, "Geometry", {10, 120})
-    og.draw_frect(10, 170, 50, 50, og.BLACK)
-    og.draw_frect_rounded(80, 170, 50, 50, 10, og.BLACK)
-    og.draw_frect_lines(150, 170, 50, 50, 2, og.BLACK)
+        og.draw_text(s.fonts[30].text_buffer, "Geometry", {10, 120})
+        og.draw_frect(10, 170, 50, 50, og.BLACK)
+        og.draw_frect_rounded(80, 170, 50, 50, 10, og.BLACK)
+        og.draw_frect_lines(150, 170, 50, 50, 2, og.BLACK)
 
-    og.draw_line_vertical(220, 170, 300, 10, og.BLACK)
-    og.draw_line_horizontal(170, 290, 520, 2.5, og.BLACK)
+        og.draw_line_vertical(220, 170, 300, 10, og.BLACK)
+        og.draw_line_horizontal(170, 290, 520, 2.5, og.BLACK)
+        //og.draw_frect_rounded_top(500, 500, 500, 500, 90, og.BLACK)
+        //og.texture_rect_text(&sdl.FRect{500, 500, 500, 500}, 2, 90, og.BLACK)
 
-    og.draw_modal(&s.gui.command_palette)
+        og.draw_modal(&s.gui.command_palette)
+
+
+        dst := sdl.FRect{500, 500, 500, 500}
+        sdl.RenderTexture(og.renderer(), s.gui.smooth_corner_rect, nil, &dst)
+    }
+
+    if s.active_viewport == .Settings {
+        og.draw_text(s.fonts[30].text_buffer, "Settings viewport", {10, 10})
+    }
 }
 
 draw_command_palette_content :: proc(m: ^og.Modal) {
@@ -188,10 +237,11 @@ on_click :: proc() {
 
 destroy_state :: proc() {
     delete(s.gui.elements)
+    sdl.DestroyTexture(s.gui.smooth_corner_rect)
 
     for _, value in s.fonts {
-        og.destroy_text(value.text_buffer)
-        og.close_font(value.font)
+        ttf.DestroyText(value.text_buffer)
+        ttf.CloseFont(value.font)
         free(value)
     }
 

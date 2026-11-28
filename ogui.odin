@@ -10,6 +10,10 @@ import ttf "vendor:sdl3/ttf"
 
 /*
     TODO(ksala):
+    - load font with stb_truetype and shape with kb_.... look how refpad does it
+    - rectangle where I can select which corners are rounded
+    - render images
+    - scoll view with scoll bar
     - Rectangle with just lines (not filled), rounded and regular
     - Some prebuilt layout options
     - Modal/Dialog
@@ -19,20 +23,14 @@ import ttf "vendor:sdl3/ttf"
     - list view
 */
 
-@(private = "file") Draw_Proc :: proc()
-@(private = "file") Update_Proc :: proc()
-@(private = "file") Event_Proc :: proc()
-@(private = "file") On_Button_Click_Proc :: proc()
+@(private = "file") Draw_Proc :: #type proc()
+@(private = "file") Update_Proc :: #type proc()
+@(private = "file") Event_Proc :: #type proc()
+@(private = "file") On_Button_Click_Proc :: #type proc()
 
 PI :: 3.14159265358979323846
 Vec2 :: [2]f32
-Rect :: sdl.Rect
-F_Rect :: sdl.FRect
 Color :: sdl.Color
-Renderer :: sdl.Renderer
-
-close_font :: ttf.CloseFont
-destroy_text :: ttf.DestroyText
 
 // TODO: Define some common Colors
 
@@ -51,7 +49,7 @@ Margin :: struct {
 }
 
 Cursor :: struct {
-    rect: F_Rect,
+    rect: sdl.FRect,
     col_idx: i32, // position in the input string
 }
 
@@ -66,17 +64,17 @@ Element_Style :: struct {
     border_color: Color,
     border_radius: f32,
 
-    color: Color, // TODO: rename to bg_color
+    bg_color: Color,
     text_color: Color,
     font_size: i32,
 
     padding: Padding,
-    margin: Margin
+    margin: Margin,
 }
 
 Element_Props :: struct {
-    bounds: F_Rect,
-    parent_bounds: ^F_Rect,
+    bounds: sdl.FRect,
+    //parent_bounds: ^F_Rect,
     style: Element_Style,
     font_data: ^Font_Data,
 }
@@ -97,7 +95,7 @@ Input_Field :: struct {
     cursor: Cursor,
 
     has_focus: bool,
-    on_update: #type proc()
+    //on_update: #type proc()
 }
 
 Modal :: struct {
@@ -105,11 +103,12 @@ Modal :: struct {
 
     is_open: bool,
     show_backdrop: bool,
+    backdrop_color: Color,
 
     width: f32,
     height: f32,
 
-    content_bounds: F_Rect,
+    content_bounds: sdl.FRect,
     draw_content: #type proc(m: ^Modal),
 }
 
@@ -122,7 +121,7 @@ State :: struct {
     text_engine: ^ttf.TextEngine,
 
     background_color: sdl.Color,
-    max_fps: i32,
+    max_fps: Maybe(i32),
 
     default_font: ^Font_Data,
 }
@@ -130,49 +129,44 @@ State :: struct {
 @(private = "file")
 state: ^State
 
-// TODO: window flags
+window :: proc() -> ^sdl.Window { return state.window }
+renderer :: proc() -> ^sdl.Renderer { return state.renderer }
+
 init :: proc(
     width: i32,
     height: i32,
     title: cstring,
     flags: sdl.WindowFlags = {}
-) {
+) -> bool {
     state = new(State)
     state.background_color = BLACK
 
     if !sdl.Init({.VIDEO}) {
         fmt.eprintln("sdl.Init failed: ", sdl.GetError())
-        return
+        return false
     }
 
     state.window = sdl.CreateWindow(
         title,
         width,
         height,
-        flags
-    )
+        flags)
 
     if state.window == nil {
         fmt.eprintln("Failed to create the window")
-        return
+        return false
     }
 
     state.renderer = sdl.CreateRenderer(state.window, nil)
     if state.renderer == nil {
         fmt.eprintln("Could not create a renderer: ", sdl.GetError())
-        return
+        return false
     }
 
     // TODO: since sdl 3.4.x
     //sdl.SetDefaultTextureAddressMode(state.renderer, .NEAREST)
 
-    // enabled trasparent colors
-    sdl.SetRenderDrawBlendMode(state.renderer, sdl.BLENDMODE_BLEND);
-
-}
-
-start_text_input :: proc() -> bool {
-    return sdl.StartTextInput(state.window)
+    return true
 }
 
 set_default_font :: proc(font_data: ^Font_Data) {
@@ -211,7 +205,7 @@ load_font :: proc(font_path: cstring, font_size: f32) -> ^Font_Data {
     return fd
 }
 
-init_font :: proc() -> bool {
+init_text_engine :: proc() -> bool {
     if !ttf.Init() {
         fmt.eprintln("Failed to init font: ", sdl.GetError())
         return false
@@ -225,7 +219,7 @@ init_font :: proc() -> bool {
     return true
 }
 
-deinit_font :: proc() {
+destroy_text_engine :: proc() {
     ttf.DestroyRendererTextEngine(state.text_engine)
     ttf.Quit()
 }
@@ -257,7 +251,6 @@ run :: proc(
     }
 
     shutdown()
-
 }
 
 quit :: proc() {
@@ -283,9 +276,6 @@ get_window_size :: proc(window := state.window) -> (w: i32, h: i32) {
     return width, height
 }
 
-get_renderer :: proc() -> ^Renderer {
-    return state.renderer
-}
 
 get_mouse_state :: proc() -> (mouse_state: sdl.MouseButtonFlags, pos: Vec2) {
     v: Vec2
@@ -293,7 +283,7 @@ get_mouse_state :: proc() -> (mouse_state: sdl.MouseButtonFlags, pos: Vec2) {
     return x, v
 }
 
-draw_frect_ex :: proc(rect: ^F_Rect, color: Color, renderer := state.renderer) {
+draw_frect_ex :: proc(rect: ^sdl.FRect, color: Color, renderer := state.renderer) {
     ok := sdl.SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a)
 	if !ok {
 		fmt.eprintln("Could not set the rect color: ", sdl.GetError())
@@ -302,13 +292,13 @@ draw_frect_ex :: proc(rect: ^F_Rect, color: Color, renderer := state.renderer) {
 	sdl.RenderFillRect(renderer, rect)
 }
 
-draw_frect :: proc(x, y, w, h: f32, color: Color, renderer := state.renderer) -> F_Rect {
+draw_frect :: proc(x, y, w, h: f32, color: Color, renderer := state.renderer) -> sdl.FRect {
     ok := sdl.SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a)
 	if !ok {
 		fmt.eprintln("Could not set the rect color: ", sdl.GetError())
 	}
 
-	rect: F_Rect = {x, y, w, h}
+	rect: sdl.FRect = {x, y, w, h}
 	sdl.RenderFillRect(renderer, &rect)
 	return rect
 }
@@ -317,7 +307,7 @@ draw_frect_lines :: proc(x, y, w, h: f32, thickness: i32, color: Color, renderer
     assert(thickness > 0)
 
     ok := sdl.SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a)
-	rect: F_Rect = {x, y, w, h}
+	rect: sdl.FRect = {x, y, w, h}
 
     sdl.RenderRect(renderer, &rect)
 
@@ -332,12 +322,61 @@ draw_frect_lines :: proc(x, y, w, h: f32, thickness: i32, color: Color, renderer
     }
 }
 
-draw_frect_rounded_ex :: proc(rect: ^F_Rect, r: f32, c: Color, renderer := state.renderer) -> F_Rect {
+draw_frect_rounded_ex :: proc(rect: ^sdl.FRect, r: f32, c: Color, renderer := state.renderer) -> sdl.FRect {
     return draw_frect_rounded(rect.x, rect.y, rect.w, rect.h, r, c, renderer)
 }
 
-draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color, renderer := state.renderer) -> F_Rect {
-    rect := F_Rect{x,y,w,h}
+// TODO: should this be part of ogui??
+// draws smooth corners
+// anti-aliasing
+// this texture should be cached. (w, h, scale, radius)
+bake_rounded_rect_to_texture :: proc(rect: ^sdl.FRect, scale: i32, radius: f32, color: sdl.Color) -> ^sdl.Texture {
+    upscaled_texture := sdl.CreateTexture(
+                 state.renderer,
+                 sdl.PixelFormat.RGBA8888,
+                 sdl.TextureAccess.TARGET,
+                 i32(rect.w) * scale,
+                 i32(rect.h) * scale)
+
+    ensure(upscaled_texture != nil)
+
+    final_texture := sdl.CreateTexture(
+                 state.renderer,
+                 sdl.PixelFormat.RGBA8888,
+                 sdl.TextureAccess.TARGET,
+                 i32(rect.w),
+                 i32(rect.h))
+
+    if final_texture == nil {
+        sdl.DestroyTexture(upscaled_texture)
+        return nil
+    }
+
+    sdl.SetTextureBlendMode(upscaled_texture, sdl.BLENDMODE_BLEND)
+    sdl.SetTextureScaleMode(upscaled_texture, sdl.ScaleMode.LINEAR)
+
+    render_target := sdl.GetRenderTarget(state.renderer)
+    sdl.SetRenderTarget(state.renderer, upscaled_texture)
+    sdl.SetRenderDrawColor(state.renderer, 0,0,0,0) // transparent
+    sdl.RenderClear(state.renderer)
+
+    big := sdl.FRect{ 0, 0, rect.w * f32(scale), rect.h * f32(scale) }
+    draw_frect_rounded_ex(&big, radius * f32(scale), color)
+
+    // downsample
+    sdl.SetRenderTarget(state.renderer, final_texture)
+    sdl.SetRenderDrawColor(state.renderer, 0, 0, 0, 0)
+    sdl.RenderClear(state.renderer);
+    dst := sdl.FRect{ 0, 0, rect.w, rect.h }
+    sdl.RenderTexture(state.renderer, upscaled_texture, nil, &dst)
+
+    sdl.SetRenderTarget(state.renderer, render_target)
+    sdl.DestroyTexture(upscaled_texture)
+    return final_texture
+}
+
+draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color, renderer := state.renderer) -> sdl.FRect {
+    rect := sdl.FRect{x,y,w,h}
     color := sdl.FColor{f32(c.r), f32(c.g), f32(c.b), f32(c.a)}
 
     if (r <= 0.0) {
@@ -386,15 +425,26 @@ draw_frect_rounded :: proc(x, y, w, h: f32, r: f32, c: Color, renderer := state.
     }
 
     sdl.RenderGeometry(renderer, nil, verts, count + 1, indices, count * 3);
+
     return rect
 }
 
-draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color, renderer := state.renderer) -> F_Rect {
+draw_frect_rounded_top :: proc(x, y, w, h: f32, radius: f32, c: Color, renderer := state.renderer) -> sdl.FRect {
+    rect := draw_frect_rounded(x, y, w, h, radius, c, renderer)
+
+    // Covers the bottom rounded corners with a regular rectangle
+    cover := sdl.FRect{rect.x, rect.y + rect.h - radius, rect.w, radius}
+    draw_frect_ex(&cover, c)
+
+    return rect
+}
+
+draw_line_vertical :: proc(x, start_y, end_y: f32, thickness: f32, color: Color, renderer := state.renderer) -> sdl.FRect {
     assert(start_y < end_y)
     return draw_frect(x, start_y, thickness, end_y - start_y, color, renderer)
 }
 
-draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Color, renderer := state.renderer) -> F_Rect {
+draw_line_horizontal :: proc(y, start_x, end_x: f32, thickness: f32, color: Color, renderer := state.renderer) -> sdl.FRect {
     assert(start_x < end_x)
     return draw_frect(start_x, y, end_x - start_x, thickness, color, renderer)
 }
@@ -405,13 +455,13 @@ draw_text :: proc(text: ^ttf.Text, s: cstring, p: Vec2, color: Color = BLACK) {
     ttf.DrawRendererText(text, p.x, p.y);
 }
 
-check_collision_point :: proc(p: Vec2, rect: F_Rect) -> bool {
+check_collision_point :: proc(p: Vec2, rect: sdl.FRect) -> bool {
     pp: sdl.FPoint = {p.x, p.y}
     return sdl.PointInRectFloat(pp, rect)
 }
 
 @(require_results)
-new_button :: proc(bounds: F_Rect, label: cstring, style: Element_Style, font_data: ^Font_Data) -> Button {
+new_button :: proc(bounds: sdl.FRect, label: cstring, style: Element_Style, font_data: ^Font_Data) -> Button {
     return Button{
         bounds = bounds,
         label = label,
@@ -423,7 +473,7 @@ new_button :: proc(bounds: F_Rect, label: cstring, style: Element_Style, font_da
 // TODO: draw text inside the button
 draw_button :: proc(b: ^Button) {
     //draw_frect_ex(&b.bounds, b.style.color)
-    draw_frect_rounded_ex(&b.bounds, 5, b.style.color)
+    draw_frect_rounded_ex(&b.bounds, 5, b.style.bg_color)
 
     p := b.bounds
 
@@ -440,7 +490,7 @@ draw_button :: proc(b: ^Button) {
 }
 
 @(require_results)
-new_input_field :: proc(bounds: F_Rect, input: cstring, placeholder: cstring, style: Element_Style, fd: ^Font_Data) -> Input_Field {
+new_input_field :: proc(bounds: sdl.FRect, input: cstring, placeholder: cstring, style: Element_Style, fd: ^Font_Data) -> Input_Field {
     return Input_Field{
         bounds = bounds,
         input = input,
@@ -467,13 +517,14 @@ draw_input_field :: proc(i: ^Input_Field) {
     draw_line_horizontal(i.bounds.y + i.font_data.font_size + 5, i.bounds.x, i.bounds.x + i.bounds.w, 2, BLACK)
 }
 
+// TODO: if content coes out of the modal then hide it
 draw_modal :: proc(m: ^Modal) {
     if !m.is_open do return
 
     ww, wh := get_window_size()
 
     if m.show_backdrop {
-        backdrop := F_Rect{0, 0, f32(ww), f32(wh)}
+        backdrop := sdl.FRect{0, 0, f32(ww), f32(wh)}
         draw_frect_ex(&backdrop, Color{0, 0, 0, 150})
     }
 
@@ -484,7 +535,7 @@ draw_modal :: proc(m: ^Modal) {
         my = m.style.margin.top
     }
 
-    border_rect : F_Rect
+    border_rect : sdl.FRect
     if m.style.border > 0 {
         border_rect = m.content_bounds
         border_rect.x -= m.style.border
@@ -493,21 +544,29 @@ draw_modal :: proc(m: ^Modal) {
         border_rect.h += m.style.border * 2
     }
 
-    m.content_bounds = F_Rect{mx, my, m.width, m.height}
+    m.content_bounds = sdl.FRect{mx, my, m.width, m.height}
     if m.style.border_radius > 0 {
         if m.style.border > 0 {
             draw_frect_rounded_ex(&border_rect, m.style.border_radius, m.style.border_color)
         }
 
-        draw_frect_rounded_ex(&m.content_bounds, m.style.border_radius, m.style.color)
+        draw_frect_rounded_ex(&m.content_bounds, m.style.border_radius, m.style.bg_color)
     } else {
         if m.style.border > 0 {
             draw_frect_ex(&border_rect, m.style.border_color)
         }
 
-        draw_frect_ex(&m.content_bounds, m.style.color)
+        draw_frect_ex(&m.content_bounds, m.style.bg_color)
     }
      
-
     m.draw_content(m)
 }
+
+draw_tabs :: proc() {
+    // TODO
+}
+
+draw_scoll_container :: proc() {
+    // TODO
+}
+
